@@ -78,7 +78,7 @@ unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto) {
 }
 
 int main() {
-    const char *image_original = "img/girl.gif";
+    const char *image_original = "/home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Vargas_Noem-Vargas/Histograma/img/girl.gif";
     //const char *image_pgm = "imagen.pgm";
     int ancho, alto;
 
