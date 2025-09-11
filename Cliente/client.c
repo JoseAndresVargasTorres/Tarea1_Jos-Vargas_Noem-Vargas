@@ -9,6 +9,12 @@
 #define MAX 80
 #define SA struct sockaddr
 
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include <stdio.h>
+#include <stdlib.h>
+
 void func(int sockfd)
 {
     char buff[MAX];
@@ -37,8 +43,50 @@ void func(int sockfd)
     }
 }
 
+// Función que recibe una imagen en cualquier formato y la pasa a .pgm (para escala de grises)
+// Esto para facilidad, ya que .ppm es un formato de C
+
+//unsigned char* Convertir_PGM(const char *NombreImagen, const char *imagen_ppm, int *ancho, int *alto) {
+unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto) {
+    int canales = 1;
+
+    // Cargar imagen, solo un canal, como es escala de grises R = G = B
+    unsigned char *pixel_array = stbi_load(NombreImagen, ancho, alto, &canales, 1);
+    if (!pixel_array) {
+        printf("Error al abrir la imagen: %s\n", NombreImagen);
+        return NULL;
+    }
+
+    // Guardar en PPM
+   /*FILE *fout = fopen(imagen_ppm, "wb");
+    if (!fout) {
+        printf("No se pudo crear el archivo PPM: %s\n", imagen_ppm);
+        stbi_image_free(pixel_array);
+        return NULL;
+    }*/ 
+
+    //fprintf(fout, "P5\n%d %d\n255\n", *ancho, *alto); // Cabecera para que sea un archivo válido
+    //fwrite(pixel_array, 1, (*ancho) * (*alto), fout); // 1 byte por píxel - Escribir los pixeles o el contenido de la imagen
+    //fclose(fout); // Cerrar el archivo
+
+    //printf("Imagen convertida a PPM: %s (%dx%d)\n", imagen_ppm, *ancho, *alto);
+
+    // Retornar el array con los píxeles
+    return pixel_array;
+}
+
 int main()
 {
+
+
+    const char *image_original = "img/girl.gif"; // Imagen a enviar
+    int ancho, alto; // Variables para guardar ancho y alto
+
+    // Llama a la función para convertir la imagen
+    unsigned char *pixels = Convertir_PGM(image_original, &ancho, &alto);
+    if (!pixels) return 1;
+    
+    // Código de client.c
     int sockfd, port;
     char ip_address[16]; // Para almacenar la dirección IP (formato 127.0.0.1)
     struct sockaddr_in servaddr;
@@ -104,6 +152,7 @@ int main()
     
     // cerrar socket
     close(sockfd);
+    stbi_image_free(pixels); // liberar memoria
     return 0;
 }
 

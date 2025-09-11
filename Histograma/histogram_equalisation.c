@@ -9,6 +9,7 @@
 
 
 // Función que aplica la ecualización del histograma a los pixeles y genera una nueva imagen
+// De ser el caso, esta es la función que debe estar en el servidor
 int Histograma_Ecualizacion(unsigned char *pixels, int *ancho, int *alto) {
 
     // Calcular la frecuencia acumulada o CDF
@@ -77,7 +78,7 @@ unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto) {
 }
 
 int main() {
-    const char *image_original = "img/niña.jpg";
+    const char *image_original = "img/girl.gif";
     //const char *image_pgm = "imagen.pgm";
     int ancho, alto;
 

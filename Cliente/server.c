@@ -24,6 +24,12 @@ void func(int connfd)
         // read the message from client and copy it in buffer 
         read(connfd, buff, sizeof(buff)); 
 
+        // VERIFICAR SI EL CLIENTE ENVIÓ "EXIT"
+        if (strncmp("exit", buff, 4) == 0) {
+            printf("Client sent exit command. Server shutting down...\n");
+            break;
+        }
+
         // print buffer which contains the client contents 
         printf("From client: %s\t To client : ", buff); 
         bzero(buff, MAX); 
