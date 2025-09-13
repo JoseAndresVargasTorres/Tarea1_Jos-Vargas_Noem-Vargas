@@ -1,0 +1,10 @@
+Comando para generar el makefile del cliente y el servidor automáticamente:
+echo -e "CC=gcc\nCFLAGS=-Wall\n\nall: cliente servidor\n\ncliente: c.c\n\t\$(CC) \$(CFLAGS) -o cliente c.c -lm\n\nservidor: s.c\n\t\$(CC) \$(CFLAGS) -o servidor s.c -lm\n\nrun-cliente: cliente\n\t./cliente\n\nrun-servidor: servidor\n\t./servidor\n\nclean:\n\trm -f cliente servidor" > Makefile
+
+(Solo si es necesario)
+Agregrar -lm: $(CC) $(CFLAGS) -o cliente c.c -lm
+
+Después de ejecutar el comando, ejecutar los siguiente:
+make
+make run-servidor
+make run-cliente

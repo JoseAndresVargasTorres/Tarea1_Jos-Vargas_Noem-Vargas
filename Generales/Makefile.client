@@ -1,0 +1,92 @@
+# Makefile para Cliente Local - ImageServer
+# CE 4303 - Principios de Sistemas Operativos
+
+# Variables básicas
+CC = gcc
+CFLAGS = -Wall -Wextra -std=c99
+TARGET = client
+SOURCE = client.c
+
+# === COMPILACIÓN ===
+
+# Regla principal - compila el cliente
+all: $(TARGET)
+	@echo "✅ Cliente compilado exitosamente"
+
+# Compilar el ejecutable
+$(TARGET): $(SOURCE)
+	$(CC) $(CFLAGS) -o $(TARGET) $(SOURCE)
+
+# Compilar con información de debug
+debug: CFLAGS += -g -DDEBUG
+debug: $(TARGET)
+	@echo "🐛 Cliente compilado en modo debug"
+
+# === CONFIGURACIÓN BÁSICA ===
+
+# Crear directorio para imágenes
+setup:
+	@echo "📁 Configurando entorno..."
+	@mkdir -p images
+	@echo "✅ Directorio 'images' creado"
+	@echo "💡 Coloque sus imágenes de prueba en ./images/"
+
+# === EJECUCIÓN ===
+
+# Ejecutar cliente
+run: $(TARGET)
+	@echo "🚀 Iniciando cliente..."
+	@echo "💡 Asegúrese de que el servidor esté ejecutándose"
+	./$(TARGET)
+
+# === PRUEBAS BÁSICAS ===
+
+# Verificar si el servidor está corriendo
+test-server:
+	@echo "🔍 Verificando servidor en puerto 8080..."
+	@timeout 3 bash -c "</dev/tcp/127.0.0.1/8080" 2>/dev/null && \
+	 echo "✅ Servidor accesible" || \
+	 echo "❌ Servidor no disponible - asegúrese de que esté corriendo"
+
+# Listar imágenes disponibles
+list-images:
+	@echo "📸 Imágenes disponibles:"
+	@if [ -d images ]; then \
+		ls -la images/ 2>/dev/null || echo "   (directorio vacío)"; \
+	else \
+		echo "   Directorio 'images' no existe - ejecute 'make setup'"; \
+	fi
+
+# === LIMPIEZA ===
+
+# Limpiar archivos compilados
+clean:
+	@echo "🧹 Limpiando..."
+	rm -f $(TARGET) *.o
+	@echo "✅ Archivos limpiados"
+
+# === AYUDA ===
+
+# Mostrar comandos disponibles
+help:
+	@echo "🛠️  Makefile para Cliente Local"
+	@echo "=============================="
+	@echo ""
+	@echo "📋 COMANDOS DISPONIBLES:"
+	@echo "   make          - Compilar cliente"
+	@echo "   make run      - Ejecutar cliente"
+	@echo "   make setup    - Crear directorio de imágenes"
+	@echo "   make debug    - Compilar con debug"
+	@echo "   make clean    - Limpiar archivos"
+	@echo ""
+	@echo "🧪 PRUEBAS:"
+	@echo "   make test-server  - Verificar si servidor está corriendo"
+	@echo "   make list-images  - Ver imágenes disponibles"
+	@echo ""
+	@echo "💡 USO TÍPICO:"
+	@echo "   make setup    # Solo la primera vez"
+	@echo "   make          # Compilar"
+	@echo "   make run      # Ejecutar"
+
+# Reglas que no crean archivos
+.PHONY: all debug setup run test-server list-images clean help
