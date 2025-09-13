@@ -479,3 +479,7 @@ CAMBIO CLAVE:
 - Esto termina completamente el programa sin esperar más entrada
 - No necesita Ctrl+C manual
 */
+
+/*
+error en el primer comando de cliente
+*/
