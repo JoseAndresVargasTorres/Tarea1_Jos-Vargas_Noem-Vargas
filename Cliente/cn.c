@@ -11,15 +11,43 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 // Estructura para enviar la información de la imagen
+
+typedef struct ImageTask
+{
+    int sockfd;
+    ImageHeader header;
+    unsigned char *data;
+    struct ImageTask *next;
+} ImageTask;
+
 typedef struct {
     int ancho;
     int alto;
     int size; // tamaño total en bytes (ancho * alto)
 } ImageHeader;
+
+#include <pthread.h>
+// Variables globales para cola de prioridad
+ImageTask *cola_imagenes = NULL;
+pthread_mutex_t cola_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cola_condition = PTHREAD_COND_INITIALIZER;
+int servidor_activo = 1;
+
+// AÑADIR ESTAS DECLARACIONES AQUÍ:
+void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto);
+void recibir_imagen_procesada(int sockfd, const char *nombre_original);
+void func(int sockfd, unsigned char *pixels, int ancho, int alto);
+unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto);
+
+
+
+
 
 void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto)
 {
@@ -28,6 +56,9 @@ void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto)
     header.alto = alto;
     header.size = ancho * alto;
     
+    // AÑADIR AQUÍ EL DEBUG
+    printf("DEBUG: Header enviado - ancho:%d, alto:%d, size:%d\n", 
+           header.ancho, header.alto, header.size);
     printf("Enviando imagen: %dx%d (%d bytes)...\n", ancho, alto, header.size);
     
     // Primero enviar el header con la información de la imagen
@@ -54,14 +85,98 @@ void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto)
         printf("Enviados %d/%d bytes\r", bytes_enviados, total_bytes);
         fflush(stdout);
     }
+    printf("\nImagen procesada enviada al cliente!\n");
+
+
+    // Recibir imagen procesada
+    recibir_imagen_procesada(sockfd, "faro.jpg");
+}
+
+
+void recibir_imagen_procesada(int sockfd, const char *nombre_original){
+
+    ImageHeader header;
+
+    printf("ESperando imagen procesada del servidor...\n");
+
+    //Recibir header
+    if(read(sockfd, &header, sizeof(ImageHeader)) <= 0){
+        printf("Error recibiendo header de imagen procesada\n");
+        return;
+    }
+
+    printf("Recibiendo imagen procesada: %dx%d (%d bytes)..\n",
+    header.ancho,header.alto,header.size);
+
+    //Alocar memoria
+    unsigned char *imagen_procesada = malloc(header.size);
+    if(!imagen_procesada){
+        printf("Error: No se pudo alocar memoria\n");
+        return;
+    }
+
+    //Recibir datos
+    int bytes_recibidos = 0;
+    while(bytes_recibidos < header.size){
+        int bytes_restantes = header.size - bytes_recibidos;
+        int resultado = read(sockfd,imagen_procesada+bytes_recibidos, bytes_restantes);
+
+        if (resultado <=0){
+            printf("ERROR  RECIBIENDO IMAGEN PROCESADA\n");
+            free(imagen_procesada);
+            return ;
+        }
+
+        bytes_recibidos += resultado;
+        printf("Descargados %d/%d bytes\r", bytes_recibidos, header.size);
+        fflush(stdout);
+
+    }
+
+    // Guardar imagen procesada
+    char nombre_salida[256];
+    snprintf(nombre_salida, sizeof(nombre_salida), "processed_%s", nombre_original);
+    stbi_write_jpg(nombre_salida, header.ancho, header.alto, 1, imagen_procesada, 90);
     
-    printf("\nImagen enviada completamente!\n");
+    printf("\nImagen procesada guardada como: %s\n", nombre_salida);
     
-    // Esperar confirmación del servidor
-    char respuesta[MAX];
-    bzero(respuesta, sizeof(respuesta));
-    read(sockfd, respuesta, sizeof(respuesta));
-    printf("Respuesta del servidor: %s\n", respuesta);
+    free(imagen_procesada);
+
+
+
+
+}
+
+
+void insertar_en_cola(int sockfd, ImageHeader header, unsigned char *data) {
+    ImageTask *nueva_tarea = malloc(sizeof(ImageTask));
+    nueva_tarea->sockfd = sockfd;
+    nueva_tarea->header = header;
+    nueva_tarea->data = malloc(header.size);
+    memcpy(nueva_tarea->data, data, header.size);
+    nueva_tarea->next = NULL;
+    
+    pthread_mutex_lock(&cola_mutex);
+    
+    // Insertar ordenado por tamaño (menor a mayor)
+    if (cola_imagenes == NULL || header.size < cola_imagenes->header.size) {
+        // Insertar al principio
+        nueva_tarea->next = cola_imagenes;
+        cola_imagenes = nueva_tarea;
+    } else {
+        // Buscar posición correcta
+        ImageTask *actual = cola_imagenes;
+        while (actual->next != NULL && actual->next->header.size <= header.size) {
+            actual = actual->next;
+        }
+        nueva_tarea->next = actual->next;
+        actual->next = nueva_tarea;
+    }
+    
+    pthread_mutex_unlock(&cola_mutex);
+    pthread_cond_signal(&cola_condition); // Avisar al procesador
+    
+    printf("Imagen añadida a cola de prioridad (tamaño: %d bytes)\n", header.size);
 }
 
 void func(int sockfd, unsigned char *pixels, int ancho, int alto)
@@ -85,7 +200,7 @@ void func(int sockfd, unsigned char *pixels, int ancho, int alto)
                 
                 // Enviar la imagen
                 enviar_imagen(sockfd, pixels, ancho, alto);
-                imagen_enviada = 1;
+                printf("¿Desea enviar otra imagen? (send/exit): ");
             } else {
                 printf("La imagen ya fue enviada. Use 'exit' para terminar.\n");
             }
@@ -95,6 +210,12 @@ void func(int sockfd, unsigned char *pixels, int ancho, int alto)
             write(sockfd, buff, strlen(buff) + 1);
             printf("Client Exit...\n");
             break;
+        }
+        else if (strncmp(buff, "help", 4) == 0) {
+            printf("\nComandos disponibles:\n");
+            printf("  send - Enviar imagen para procesar\n");
+            printf("  exit - Salir del cliente\n");
+            printf("  help - Mostrar esta ayuda\n\n");
         }
         else {
             // Para otros comandos, enviar como texto normal
@@ -204,6 +325,8 @@ int main()
     return 0;
 }
 
+
+// docker build -t client .
 // docker run --rm --network=host -it client
 // localhost / 127.0.0.1
 // ip a

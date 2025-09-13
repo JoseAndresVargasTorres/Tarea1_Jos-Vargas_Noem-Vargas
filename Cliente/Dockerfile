@@ -5,10 +5,12 @@ FROM gcc:latest
 WORKDIR /app
 
 # Copiar el código fuente del cliente al contenedor
-COPY client.c .
+COPY cn.c .
+COPY stb_image.h .
+COPY faro.jpg .
 
 # Compilar el cliente
-RUN gcc client.c -o client
+RUN gcc cn.c -o client -lm
 
 # El contenedor se ejecutará iniciando el cliente
 ENTRYPOINT ["./client"]

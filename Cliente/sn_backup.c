@@ -5,18 +5,10 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
-#include <time.h>
 #include <unistd.h> // read(), write(), close()
 #define MAX 80 // Máximo tamaño del buffer 80 bytes
 #define PORT 1717 // Puerto por defecto
 #define SA struct sockaddr
-
-//Agregar las definiciones de stb_image.h y el stb_image_write.h
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-
 
 // Estructura para recibir la información de la imagen (debe ser igual a la del cliente)
 typedef struct {
@@ -29,10 +21,6 @@ typedef struct {
 void guardar_imagen_pgm(unsigned char *pixels, int ancho, int alto, const char *nombre_archivo);
 void recibir_imagen(int connfd);
 void func(int connfd);
-int Histograma_Ecualizacion(unsigned char *pixels, int ancho, int alto);  // ← AÑADIR ESTA LÍNEA
-
-
-
 
 // Función para recibir imagen completa
 void recibir_imagen(int connfd) {
@@ -43,10 +31,7 @@ void recibir_imagen(int connfd) {
         printf("Error recibiendo header de imagen\n");
         return;
     }
-    // AÑADIR AQUÍ EL DEBUG
-        printf("DEBUG: Header recibido - ancho:%d, alto:%d, size:%d\n", 
-       header.ancho, header.alto, header.size);
-
+    
     printf("Recibiendo imagen: %dx%d (%d bytes)...\n", header.ancho, header.alto, header.size);
     
     // Alocar memoria para la imagen
@@ -77,44 +62,15 @@ void recibir_imagen(int connfd) {
         fflush(stdout);
     }
     
-
-
-    // Aplicar histograma de ecualización
-        printf("Aplicando histograma de ecualización...\n");
-        Histograma_Ecualizacion(imagen_buffer, header.ancho, header.alto);
-        
-        // Guardar imagen procesada
-        char nombre_procesada[256];
-        snprintf(nombre_procesada, sizeof(nombre_procesada), "imagen_procesada_%ld.jpg", time(NULL));
-        stbi_write_jpg(nombre_procesada, header.ancho, header.alto, 1, imagen_buffer, 90);
-        printf("Imagen procesada guardada como: %s\n", nombre_procesada);
-
-        printf("Enviando imagen procesada de vuelta al cliente...\n");
-
-       // Enviar header de vuelta
-        if (write(connfd, &header, sizeof(ImageHeader)) < 0) {
-            printf("Error enviando header de vuelta\n");
-            free(imagen_buffer);
-            return;
-        }
+    printf("\nImagen recibida completamente!\n");
     
-    // Enviar datos de la imagen procesada
-        int bytes_enviados = 0;
-        while (bytes_enviados < header.size) {
-            int bytes_restantes = header.size - bytes_enviados;
-            int chunk_size = (bytes_restantes > 4096) ? 4096 : bytes_restantes;
-            
-            int resultado = write(connfd, imagen_buffer + bytes_enviados, chunk_size);
-            if (resultado < 0) {
-                printf("Error enviando imagen procesada\n");
-                free(imagen_buffer);
-                return;
-            }
-            bytes_enviados += resultado;
-            printf("Enviados %d/%d bytes al cliente\r", bytes_enviados, header.size);
-            fflush(stdout);
-        }
-        printf("\nImagen procesada enviada al cliente!\n");
+    // Aquí puedes procesar la imagen como necesites
+    // Por ejemplo, guardarla en un archivo .pgm
+    guardar_imagen_pgm(imagen_buffer, header.ancho, header.alto, "imagen_recibida.pgm");
+    
+    // Enviar confirmación al cliente
+    write(connfd, "Imagen recibida correctamente", 30);
+    
     // Liberar memoria
     free(imagen_buffer);
 }
@@ -244,35 +200,6 @@ int main()
     
     // After chatting close the socket
     close(sockfd);
-    
-    return 0;
-}
-
-
-//Función histograma
-// Función que aplica la ecualización del histograma
-int Histograma_Ecualizacion(unsigned char *pixels, int ancho, int alto) {
-    int frecuencia[256] = {0};
-    int frecuencia_acumulada[256] = {0};
-    int total_pixels = ancho * alto;
-
-    // Contar pixeles de cada intensidad 
-    for(int i = 0; i < total_pixels; i++){
-        unsigned char valor = pixels[i];
-        frecuencia[valor]++;
-    }
-
-    // Calcular la frecuencia acumulada
-    frecuencia_acumulada[0] = frecuencia[0];
-    for(int i = 1; i < 256; i++){
-        frecuencia_acumulada[i] = frecuencia_acumulada[i-1] + frecuencia[i];
-    }
-
-    // Aplicar ecualización
-    for(int i = 0; i < total_pixels; i++){
-        unsigned char nuevo_pixel = (frecuencia_acumulada[pixels[i]] * 255) / total_pixels;
-        pixels[i] = nuevo_pixel;
-    }
     
     return 0;
 }
