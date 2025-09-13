@@ -1,0 +1,42 @@
+Forma Local
+
+
+1. Crear archivo de servicio
+
+sudo nano /etc/systemd/system/s.c.service
+
+[Unit]
+Description=Servidor de procesamiento de imágenes S.C
+After=network.target
+
+[Service]
+Type=simple
+User=mimi
+WorkingDirectory=/home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Varga>
+ExecStartPre=/usr/bin/make -C /home/mimi/Documents/Tarea1_Operativos/Codigo/Tar>
+ExecStart=/home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Vargas_Noem->
+Restart=on-failure
+
+
+[Install]
+WantedBy=multi-user.target
+
+
+
+
+
+2. Habilitar y probar
+
+# Recargar systemd para reconocer el nuevo servicio
+sudo systemctl daemon-reload
+
+# Habilitar para que arranque con el sistema
+sudo systemctl enable s.c.service
+
+# Iniciar ahora mismo
+sudo systemctl start s.c.service
+
+# Verificar estado y logs
+sudo systemctl status s.c.service
+journalctl -u s.c.service -f
+
