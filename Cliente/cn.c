@@ -1,11 +1,12 @@
-#include <arpa/inet.h> // inet_addr()
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h> // bzero()
+#include <strings.h>
 #include <sys/socket.h>
-#include <unistd.h> // read(), write(), close()
+#include <unistd.h>
+#include <dirent.h>
 #define MAX 80
 #define SA struct sockaddr
 
@@ -13,320 +14,343 @@
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-#include <stdio.h>
-#include <stdlib.h>
 
-// Estructura para enviar la información de la imagen
-
-typedef struct ImageTask
-{
-    int sockfd;
-    ImageHeader header;
-    unsigned char *data;
-    struct ImageTask *next;
-} ImageTask;
-
+// Estructura para información de imagen
 typedef struct {
     int ancho;
     int alto;
-    int size; // tamaño total en bytes (ancho * alto)
+    int size;
 } ImageHeader;
 
-#include <pthread.h>
-// Variables globales para cola de prioridad
-ImageTask *cola_imagenes = NULL;
-pthread_mutex_t cola_mutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cola_condition = PTHREAD_COND_INITIALIZER;
-int servidor_activo = 1;
-
-// AÑADIR ESTAS DECLARACIONES AQUÍ:
-void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto);
+// Declaraciones de funciones
+void enviar_imagen(int sockfd, const char *nombre_archivo);
 void recibir_imagen_procesada(int sockfd, const char *nombre_original);
-void func(int sockfd, unsigned char *pixels, int ancho, int alto);
-unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto);
+void mostrar_imagenes_disponibles();
+void mostrar_menu();
+void mostrar_banner();
+unsigned char* cargar_imagen(const char *nombre_imagen, int *ancho, int *alto);
 
+// Función para mostrar banner inicial
+void mostrar_banner() {
+    printf("╔══════════════════════════════════════════════════════════════════╗\n");
+    printf("║                    CLIENTE PROCESAMIENTO IMÁGENES                ║\n");
+    printf("║                     Instituto Tecnológico CR                    ║\n");
+    printf("║                         Versión 1.0                             ║\n");
+    printf("╚══════════════════════════════════════════════════════════════════╝\n\n");
+}
 
+// Función para mostrar imágenes disponibles
+void mostrar_imagenes_disponibles() {
+    DIR *dir;
+    struct dirent *entry;
+    int count = 0;
+    
+    printf("┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("│                    IMÁGENES DISPONIBLES                         │\n");
+    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    
+    dir = opendir(".");
+    if (dir != NULL) {
+        while ((entry = readdir(dir)) != NULL) {
+            char *ext = strrchr(entry->d_name, '.');
+            if (ext != NULL) {
+                if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0 || 
+                    strcasecmp(ext, ".png") == 0 || strcasecmp(ext, ".gif") == 0) {
+                    printf("│  %d. %-58s │\n", ++count, entry->d_name);
+                }
+            }
+        }
+        closedir(dir);
+    }
+    
+    if (count == 0) {
+        printf("│  No se encontraron imágenes (jpg, jpeg, png, gif)               │\n");
+    }
+    printf("└─────────────────────────────────────────────────────────────────┘\n");
+}
 
+// Función para mostrar menú
+void mostrar_menu() {
+    printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("│                         OPCIONES                                │\n");
+    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    printf("│  enviar <archivo>  - Enviar imagen para procesamiento           │\n");
+    printf("│  listar           - Mostrar imágenes disponibles                │\n");
+    printf("│  help             - Mostrar ayuda                               │\n");
+    printf("│  exit             - Salir del cliente                           │\n");
+    printf("└─────────────────────────────────────────────────────────────────┘\n");
+}
 
+// Función para cargar imagen
+unsigned char* cargar_imagen(const char *nombre_imagen, int *ancho, int *alto) {
+    int canales = 1;
+    
+    unsigned char *pixel_array = stbi_load(nombre_imagen, ancho, alto, &canales, 1);
+    if (!pixel_array) {
+        printf("❌ Error al cargar imagen: %s\n", nombre_imagen);
+        return NULL;
+    }
+    
+    printf("✓ Imagen cargada: %s (%dx%d pixels, %d bytes)\n", 
+           nombre_imagen, *ancho, *alto, (*ancho) * (*alto));
+    return pixel_array;
+}
 
-void enviar_imagen(int sockfd, unsigned char *pixels, int ancho, int alto)
-{
+// Función para enviar imagen
+void enviar_imagen(int sockfd, const char *nombre_archivo) {
+    int ancho, alto;
+    unsigned char *pixels = cargar_imagen(nombre_archivo, &ancho, &alto);
+    
+    if (!pixels) {
+        printf("❌ No se pudo cargar la imagen: %s\n", nombre_archivo);
+        return;
+    }
+    
     ImageHeader header;
     header.ancho = ancho;
     header.alto = alto;
     header.size = ancho * alto;
     
-    // AÑADIR AQUÍ EL DEBUG
-    printf("DEBUG: Header enviado - ancho:%d, alto:%d, size:%d\n", 
-           header.ancho, header.alto, header.size);
-    printf("Enviando imagen: %dx%d (%d bytes)...\n", ancho, alto, header.size);
-    
-    // Primero enviar el header con la información de la imagen
-    if (write(sockfd, &header, sizeof(ImageHeader)) < 0) {
-        printf("Error enviando header de imagen\n");
+    // Enviar comando IMAGE
+    if (write(sockfd, "IMAGE", 6) < 0) {
+        printf("❌ Error enviando comando IMAGE\n");
+        stbi_image_free(pixels);
         return;
     }
     
-    // Luego enviar los datos de la imagen
-    int bytes_enviados = 0;
-    int total_bytes = header.size;
+    printf("📤 Enviando imagen al servidor...\n");
     
-    while (bytes_enviados < total_bytes) {
-        int bytes_restantes = total_bytes - bytes_enviados;
-        int chunk_size = (bytes_restantes > 4096) ? 4096 : bytes_restantes; // Enviar en chunks de máximo 4KB
+    // Enviar header
+    if (write(sockfd, &header, sizeof(ImageHeader)) < 0) {
+        printf("❌ Error enviando información de imagen\n");
+        stbi_image_free(pixels);
+        return;
+    }
+    
+    // Enviar datos en chunks
+    int bytes_enviados = 0;
+    printf("Progreso: ");
+    while (bytes_enviados < header.size) {
+        int bytes_restantes = header.size - bytes_enviados;
+        int chunk_size = (bytes_restantes > 4096) ? 4096 : bytes_restantes;
         
         int resultado = write(sockfd, pixels + bytes_enviados, chunk_size);
         if (resultado < 0) {
-            printf("Error enviando datos de imagen\n");
+            printf("\n❌ Error enviando datos de imagen\n");
+            stbi_image_free(pixels);
             return;
         }
         
         bytes_enviados += resultado;
-        printf("Enviados %d/%d bytes\r", bytes_enviados, total_bytes);
+        int porcentaje = (bytes_enviados * 100) / header.size;
+        printf("\rProgreso: [");
+        int barras = porcentaje / 5;
+        for (int i = 0; i < 20; i++) {
+            printf(i < barras ? "=" : " ");
+        }
+        printf("] %d%%", porcentaje);
         fflush(stdout);
     }
-    printf("\nImagen procesada enviada al cliente!\n");
-
-
+    printf("\n✓ Imagen enviada completamente!\n");
+    
     // Recibir imagen procesada
-    recibir_imagen_procesada(sockfd, "faro.jpg");
+    recibir_imagen_procesada(sockfd, nombre_archivo);
+    
+    stbi_image_free(pixels);
 }
 
-
-void recibir_imagen_procesada(int sockfd, const char *nombre_original){
-
+// Función para recibir imagen procesada
+void recibir_imagen_procesada(int sockfd, const char *nombre_original) {
     ImageHeader header;
-
-    printf("ESperando imagen procesada del servidor...\n");
-
-    //Recibir header
-    if(read(sockfd, &header, sizeof(ImageHeader)) <= 0){
-        printf("Error recibiendo header de imagen procesada\n");
+    
+    printf("📥 Esperando imagen procesada del servidor...\n");
+    
+    // Recibir header
+    if (read(sockfd, &header, sizeof(ImageHeader)) <= 0) {
+        printf("❌ Error recibiendo información de imagen procesada\n");
         return;
     }
-
-    printf("Recibiendo imagen procesada: %dx%d (%d bytes)..\n",
-    header.ancho,header.alto,header.size);
-
-    //Alocar memoria
+    
+    printf("📥 Recibiendo imagen procesada: %dx%d (%d bytes)\n", 
+           header.ancho, header.alto, header.size);
+    
+    // Alocar memoria
     unsigned char *imagen_procesada = malloc(header.size);
-    if(!imagen_procesada){
-        printf("Error: No se pudo alocar memoria\n");
+    if (!imagen_procesada) {
+        printf("❌ Error: No se pudo alocar memoria\n");
         return;
     }
-
-    //Recibir datos
+    
+    // Recibir datos
     int bytes_recibidos = 0;
-    while(bytes_recibidos < header.size){
+    printf("Descarga: ");
+    while (bytes_recibidos < header.size) {
         int bytes_restantes = header.size - bytes_recibidos;
-        int resultado = read(sockfd,imagen_procesada+bytes_recibidos, bytes_restantes);
-
-        if (resultado <=0){
-            printf("ERROR  RECIBIENDO IMAGEN PROCESADA\n");
+        int resultado = read(sockfd, imagen_procesada + bytes_recibidos, bytes_restantes);
+        
+        if (resultado <= 0) {
+            printf("\n❌ Error recibiendo imagen procesada\n");
             free(imagen_procesada);
-            return ;
+            return;
         }
-
+        
         bytes_recibidos += resultado;
-        printf("Descargados %d/%d bytes\r", bytes_recibidos, header.size);
+        int porcentaje = (bytes_recibidos * 100) / header.size;
+        printf("\rDescarga: [");
+        int barras = porcentaje / 5;
+        for (int i = 0; i < 20; i++) {
+            printf(i < barras ? "=" : " ");
+        }
+        printf("] %d%%", porcentaje);
         fflush(stdout);
-
     }
-
+    
     // Guardar imagen procesada
     char nombre_salida[256];
-    snprintf(nombre_salida, sizeof(nombre_salida), "processed_%s", nombre_original);
-    stbi_write_jpg(nombre_salida, header.ancho, header.alto, 1, imagen_procesada, 90);
+    char *punto = strrchr(nombre_original, '.');
+    if (punto) {
+        int pos = punto - nombre_original;
+        strncpy(nombre_salida, nombre_original, pos);
+        nombre_salida[pos] = '\0';
+        strcat(nombre_salida, "_processed.jpg");
+    } else {
+        strcpy(nombre_salida, "processed_image.jpg");
+    }
     
-    printf("\nImagen procesada guardada como: %s\n", nombre_salida);
+    if (stbi_write_jpg(nombre_salida, header.ancho, header.alto, 1, imagen_procesada, 90)) {
+        printf("\n✓ Imagen procesada guardada como: %s\n", nombre_salida);
+        printf("🎨 ¡Histograma de ecualización aplicado exitosamente!\n");
+    } else {
+        printf("\n❌ Error guardando imagen procesada\n");
+    }
     
     free(imagen_procesada);
-
-
-
-
 }
 
-
-void insertar_en_cola(int sockfd, ImageHeader header, unsigned char *data) {
-    ImageTask *nueva_tarea = malloc(sizeof(ImageTask));
-    nueva_tarea->sockfd = sockfd;
-    nueva_tarea->header = header;
-    nueva_tarea->data = malloc(header.size);
-    memcpy(nueva_tarea->data, data, header.size);
-    nueva_tarea->next = NULL;
+// Función principal del cliente
+void cliente_interactivo(int sockfd) {
+    char comando[256];
+    char archivo[200];
     
-    pthread_mutex_lock(&cola_mutex);
+    mostrar_banner();
+    mostrar_imagenes_disponibles();
+    mostrar_menu();
     
-    // Insertar ordenado por tamaño (menor a mayor)
-    if (cola_imagenes == NULL || header.size < cola_imagenes->header.size) {
-        // Insertar al principio
-        nueva_tarea->next = cola_imagenes;
-        cola_imagenes = nueva_tarea;
-    } else {
-        // Buscar posición correcta
-        ImageTask *actual = cola_imagenes;
-        while (actual->next != NULL && actual->next->header.size <= header.size) {
-            actual = actual->next;
-        }
-        nueva_tarea->next = actual->next;
-        actual->next = nueva_tarea;
-    }
+    printf("\n🔗 Conectado al servidor de procesamiento de imágenes\n");
+    printf("✨ Las imágenes se procesan por tamaño (pequeñas primero)\n");
     
-    pthread_mutex_unlock(&cola_mutex);
-    pthread_cond_signal(&cola_condition); // Avisar al procesador
-    
-    printf("Imagen añadida a cola de prioridad (tamaño: %d bytes)\n", header.size);
-}
-
-void func(int sockfd, unsigned char *pixels, int ancho, int alto)
-{
-    char buff[MAX];
-    int n;
-    int imagen_enviada = 0; // Flag para controlar si ya se envió la imagen
-    
-    for (;;) {
-        bzero(buff, sizeof(buff));
-        printf("Enter command (send/exit): ");
-        n = 0;
-        // leer del teclado hasta '\n'
-        while ((buff[n++] = getchar()) != '\n') ;
-        buff[n-1] = '\0'; // reemplaza '\n' por '\0'
+    while (1) {
+        printf("\n> Ingrese comando: ");
+        fflush(stdout);
         
-        if (strncmp(buff, "send", 4) == 0) {
-            if (!imagen_enviada) {
-                // Enviar comando al servidor para indicar que viene una imagen
-                write(sockfd, "IMAGE", 6);
-                
-                // Enviar la imagen
-                enviar_imagen(sockfd, pixels, ancho, alto);
-                printf("¿Desea enviar otra imagen? (send/exit): ");
-            } else {
-                printf("La imagen ya fue enviada. Use 'exit' para terminar.\n");
-            }
-        }
-        else if (strncmp(buff, "exit", 4) == 0) {
-            // enviar comando exit al servidor
-            write(sockfd, buff, strlen(buff) + 1);
-            printf("Client Exit...\n");
+        if (!fgets(comando, sizeof(comando), stdin)) {
             break;
         }
-        else if (strncmp(buff, "help", 4) == 0) {
-            printf("\nComandos disponibles:\n");
-            printf("  send - Enviar imagen para procesar\n");
-            printf("  exit - Salir del cliente\n");
-            printf("  help - Mostrar esta ayuda\n\n");
-        }
-        else {
-            // Para otros comandos, enviar como texto normal
-            write(sockfd, buff, strlen(buff) + 1);
+        
+        // Remover salto de línea
+        comando[strcspn(comando, "\n")] = '\0';
+        
+        // Parsear comando
+        if (strncmp(comando, "enviar ", 7) == 0) {
+            sscanf(comando, "enviar %199s", archivo);
+            printf("\n📋 Procesando: %s\n", archivo);
+            printf("⏳ Su imagen se procesará según su tamaño en la cola de prioridad\n");
+            enviar_imagen(sockfd, archivo);
             
-            // leer respuesta del servidor
-            bzero(buff, sizeof(buff));
-            read(sockfd, buff, sizeof(buff));
-            printf("From Server : %s\n", buff);
+        } else if (strcmp(comando, "listar") == 0) {
+            printf("\n");
+            mostrar_imagenes_disponibles();
+            
+        } else if (strcmp(comando, "help") == 0) {
+            printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+            printf("│                            AYUDA                                │\n");
+            printf("├─────────────────────────────────────────────────────────────────┤\n");
+            printf("│  • Para enviar una imagen: enviar nombre_archivo.jpg            │\n");
+            printf("│  • Formatos soportados: JPG, JPEG, PNG, GIF                     │\n");
+            printf("│  • Las imágenes se procesan por orden de tamaño                 │\n");
+            printf("│  • Las más pequeñas tienen prioridad sobre las grandes          │\n");
+            printf("│  • La imagen procesada se guarda con sufijo '_processed'        │\n");
+            printf("│  • El servidor puede manejar múltiples clientes simultáneamente │\n");
+            printf("└─────────────────────────────────────────────────────────────────┘\n");
+            
+        } else if (strcmp(comando, "exit") == 0) {
+            printf("\n👋 Cerrando cliente...\n");
+            write(sockfd, "exit", 5);
+            break;
+            
+        } else if (strlen(comando) == 0) {
+            // Comando vacío, no hacer nada
+            continue;
+            
+        } else {
+            printf("❌ Comando no reconocido: '%s'\n", comando);
+            printf("💡 Use 'help' para ver comandos disponibles\n");
         }
     }
+    
+    printf("✓ Cliente desconectado del servidor\n");
 }
 
-// Función que recibe una imagen en cualquier formato y la pasa a array de bytes
-unsigned char* Convertir_PGM(const char *NombreImagen, int *ancho, int *alto) {
-    int canales = 1;
-
-    // Cargar imagen, solo un canal, como es escala de grises R = G = B
-    unsigned char *pixel_array = stbi_load(NombreImagen, ancho, alto, &canales, 1);
-    if (!pixel_array) {
-        printf("Error al abrir la imagen: %s\n", NombreImagen);
-        return NULL;
-    }
-
-    printf("Imagen cargada: %s (%dx%d)\n", NombreImagen, *ancho, *alto);
-    
-    // Retornar el array con los píxeles
-    return pixel_array;
-}
-
-int main()
-{
-    const char *image_original = "faro.jpg"; // Imagen a enviar
-    int ancho, alto; // Variables para guardar ancho y alto
-
-    // Llama a la función para convertir la imagen
-    unsigned char *pixels = Convertir_PGM(image_original, &ancho, &alto);
-    if (!pixels) return 1;
-    
-    // Código de client.c
+int main() {
     int sockfd, port;
-    char ip_address[16]; // Para almacenar la dirección IP (formato 127.0.0.1)
+    char ip_address[32];
     struct sockaddr_in servaddr;
     
-    // Solicitar IP del servidor
-    printf("Enter server IP address: ");
-    if (fgets(ip_address, sizeof(ip_address), stdin) == NULL) {
-        printf("Error reading IP address...\n");
+    // Solicitar datos de conexión
+    printf("🌐 CONFIGURACIÓN DE CONEXIÓN\n");
+    printf("════════════════════════════\n");
+    
+    printf("IP del servidor: ");
+    if (!fgets(ip_address, sizeof(ip_address), stdin)) {
+        printf("❌ Error leyendo IP\n");
         exit(1);
     }
-    
-    // Remover el '\n' del final si existe
     ip_address[strcspn(ip_address, "\n")] = '\0';
     
-    // Solicitar puerto del servidor
-    printf("Enter server port: ");
+    printf("Puerto del servidor: ");
     if (scanf("%d", &port) != 1) {
-        printf("Error reading port number...\n");
+        printf("❌ Error leyendo puerto\n");
         exit(1);
     }
-    
-    // Limpiar el buffer de entrada después de scanf
-    while (getchar() != '\n');
+    while (getchar() != '\n'); // Limpiar buffer
     
     // Validar puerto
     if (port < 1 || port > 65535) {
-        printf("Invalid port number. Port must be between 1 and 65535...\n");
+        printf("❌ Puerto inválido (debe estar entre 1 y 65535)\n");
         exit(1);
     }
     
-    // crear socket
+    // Crear socket
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
-        printf("socket creation failed...\n");
-        exit(0);
-    } else
-        printf("Socket successfully created..\n");
+        printf("❌ Error creando socket\n");
+        exit(1);
+    }
     
+    // Configurar dirección del servidor
     bzero(&servaddr, sizeof(servaddr));
-    
-    // asignar IP y puerto ingresados por el usuario
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = inet_addr(ip_address);
     servaddr.sin_port = htons(port);
     
-    // Verificar si la IP es válida
     if (servaddr.sin_addr.s_addr == INADDR_NONE) {
-        printf("Invalid IP address...\n");
+        printf("❌ Dirección IP inválida\n");
         exit(1);
     }
     
-    printf("Attempting to connect to %s:%d...\n", ip_address, port);
+    printf("\n🔗 Conectando a %s:%d...\n", ip_address, port);
     
-    // conectar al servidor
+    // Conectar al servidor
     if (connect(sockfd, (SA*)&servaddr, sizeof(servaddr)) != 0) {
-        printf("connection with the server failed...\n");
-        exit(0);
-    } else
-        printf("connected to the server..\n");
+        printf("❌ Error conectando al servidor\n");
+        printf("💡 Verifique que el servidor esté ejecutándose\n");
+        exit(1);
+    }
     
-    // función para manejar comandos y envío de imagen
-    func(sockfd, pixels, ancho, alto);
+    // Iniciar sesión interactiva
+    cliente_interactivo(sockfd);
     
-    // cerrar socket
+    // Cerrar socket
     close(sockfd);
-    stbi_image_free(pixels); // liberar memoria
     return 0;
 }
-
-
-// docker build -t client .
-// docker run --rm --network=host -it client
-// localhost / 127.0.0.1
-// ip a
