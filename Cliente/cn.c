@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <time.h>
+#include <sys/select.h>  // AGREGADO PARA select()
 #define MAX 80
 #define SA struct sockaddr
 
@@ -44,6 +45,29 @@ void mostrar_banner();
 unsigned char* cargar_imagen(const char *nombre_imagen, int *ancho, int *alto);
 void agregar_imagen_enviada(const char *filename);
 void mostrar_progreso_recepcion();
+void limpiar_buffer_socket(int sockfd);  // NUEVA FUNCIÓN
+
+// NUEVA FUNCIÓN: Limpiar buffer del socket
+void limpiar_buffer_socket(int sockfd) {
+    printf("Limpiando buffer del socket...\n");
+    char buffer_limpieza[1024];
+    fd_set readfds;
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100000; // 100ms timeout
+
+    FD_ZERO(&readfds);
+    FD_SET(sockfd, &readfds);
+
+    // Intentar leer datos residuales (sin bloquear)
+    if (select(sockfd + 1, &readfds, NULL, NULL, &timeout) > 0) {
+        int bytes_residuales = read(sockfd, buffer_limpieza, sizeof(buffer_limpieza));
+        if (bytes_residuales > 0) {
+            printf("Datos residuales limpiados: %d bytes\n", bytes_residuales);
+        }
+    }
+    printf("Buffer limpiado exitosamente.\n");
+}
 
 // Función para agregar imagen a la lista de enviadas
 void agregar_imagen_enviada(const char *filename) {
@@ -69,9 +93,9 @@ void mostrar_imagenes_disponibles() {
     struct dirent *entry;
     int count = 0;
     
-    printf("┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("┌───────────────────────────────────────────────────────────────────┐\n");
     printf("│                    IMÁGENES DISPONIBLES                         │\n");
-    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    printf("├───────────────────────────────────────────────────────────────────┤\n");
     
     dir = opendir(".");
     if (dir != NULL) {
@@ -90,20 +114,20 @@ void mostrar_imagenes_disponibles() {
     if (count == 0) {
         printf("│  No se encontraron imágenes (jpg, jpeg, png, gif)               │\n");
     }
-    printf("└─────────────────────────────────────────────────────────────────┘\n");
+    printf("└───────────────────────────────────────────────────────────────────┘\n");
 }
 
 // Función para mostrar menú
 void mostrar_menu() {
-    printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("\n┌───────────────────────────────────────────────────────────────────┐\n");
     printf("│                         OPCIONES                                │\n");
-    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    printf("├───────────────────────────────────────────────────────────────────┤\n");
     printf("│  enviar <archivo>  - Enviar imagen (se almacena en servidor)     │\n");
     printf("│  listar           - Mostrar imágenes disponibles                │\n");
     printf("│  estado           - Ver estado de la sesión                     │\n");
     printf("│  exit             - Finalizar envío e INICIAR procesamiento     │\n");
     printf("│  help             - Mostrar ayuda                               │\n");
-    printf("└─────────────────────────────────────────────────────────────────┘\n");
+    printf("└───────────────────────────────────────────────────────────────────┘\n");
 }
 
 // Función para cargar imagen
@@ -122,6 +146,7 @@ unsigned char* cargar_imagen(const char *nombre_imagen, int *ancho, int *alto) {
 }
 
 // Función para enviar imagen (solo enviar, no esperar respuesta procesada)
+// Función para enviar imagen (solo enviar, no esperar respuesta procesada)
 void enviar_imagen_secuencial(int sockfd, const char *nombre_archivo) {
     int ancho, alto;
     unsigned char *pixels = cargar_imagen(nombre_archivo, &ancho, &alto);
@@ -136,24 +161,35 @@ void enviar_imagen_secuencial(int sockfd, const char *nombre_archivo) {
     header.alto = alto;
     header.size = ancho * alto;
     
-    // Enviar comando IMAGE
-    if (write(sockfd, "IMAGE", 6) < 0) {
+    printf("Enviando imagen al servidor (MODO SECUENCIAL)...\n");
+    printf("Header a enviar: %dx%d (%d bytes)\n", header.ancho, header.alto, header.size);
+    
+    // PASO 1: Enviar comando IMAGE con salto de línea para separar
+    char comando[] = "IMAGE\n";
+    if (write(sockfd, comando, strlen(comando)) < 0) {
         printf("Error enviando comando IMAGE\n");
         stbi_image_free(pixels);
         return;
     }
     
-    printf("Enviando imagen al servidor (MODO SECUENCIAL)...\n");
+    printf("Comando IMAGE enviado exitosamente\n");
     
-    // Enviar header
+    // PASO 2: Pequeña pausa para asegurar que el servidor procese el comando
+    usleep(100000); // 100ms
+    
+    // PASO 3: Enviar header
+    printf("Enviando header...\n");
     if (write(sockfd, &header, sizeof(ImageHeader)) < 0) {
         printf("Error enviando información de imagen\n");
         stbi_image_free(pixels);
         return;
     }
     
-    // Enviar datos en chunks
+    printf("Header enviado exitosamente\n");
+    
+    // PASO 4: Enviar datos en chunks
     int bytes_enviados = 0;
+    printf("Enviando datos de imagen:\n");
     printf("Progreso: ");
     while (bytes_enviados < header.size) {
         int bytes_restantes = header.size - bytes_enviados;
@@ -178,22 +214,26 @@ void enviar_imagen_secuencial(int sockfd, const char *nombre_archivo) {
     }
     printf("\n");
     
-    // Esperar confirmación del servidor
-    char confirmacion[16];
+    printf("Datos enviados completamente. Esperando confirmación...\n");
+    
+    // PASO 5: Esperar confirmación del servidor
+    char confirmacion[32];
     memset(confirmacion, 0, sizeof(confirmacion));
     int bytes_leidos = read(sockfd, confirmacion, sizeof(confirmacion) - 1);
     if (bytes_leidos > 0) {
         confirmacion[bytes_leidos] = '\0';
+        printf("Respuesta del servidor: '%s'\n", confirmacion);
+        
         if (strncmp(confirmacion, "OK", 2) == 0) {
-            printf("Imagen %s enviada y almacenada en servidor!\n", nombre_archivo);
+            printf("✓ Imagen %s enviada y almacenada en servidor!\n", nombre_archivo);
             agregar_imagen_enviada(nombre_archivo);
         } else if (strncmp(confirmacion, "ERROR", 5) == 0) {
-            printf("El servidor rechazó la imagen: %s\n", confirmacion);
+            printf("✗ El servidor rechazó la imagen: %s\n", confirmacion);
         } else {
-            printf("Confirmación no válida del servidor: %s\n", confirmacion);
+            printf("? Confirmación no válida del servidor: %s\n", confirmacion);
         }
     } else {
-        printf("No se recibió confirmación del servidor\n");
+        printf("✗ No se recibió confirmación del servidor\n");
     }
     
     stbi_image_free(pixels);
@@ -348,9 +388,9 @@ void cliente_interactivo(int sockfd) {
             mostrar_progreso_recepcion();
             
         } else if (strcmp(comando, "help") == 0) {
-            printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+            printf("\n┌───────────────────────────────────────────────────────────────────┐\n");
             printf("│                            AYUDA                                │\n");
-            printf("├─────────────────────────────────────────────────────────────────┤\n");
+            printf("├───────────────────────────────────────────────────────────────────┤\n");
             printf("│  • Para enviar una imagen: enviar nombre_archivo.jpg            │\n");
             printf("│  • Formatos soportados: JPG, JPEG, PNG, GIF                     │\n");
             printf("│  • MODO SECUENCIAL: Las imágenes se almacenan en el servidor    │\n");
@@ -358,7 +398,7 @@ void cliente_interactivo(int sockfd) {
             printf("│  • Las más pequeñas se procesan primero                         │\n");
             printf("│  • Recibirá todas las imágenes procesadas al final              │\n");
             printf("│  • Use 'estado' para ver cuántas imágenes ha enviado            │\n");
-            printf("└─────────────────────────────────────────────────────────────────┘\n");
+            printf("└───────────────────────────────────────────────────────────────────┘\n");
             
         } else if (strcmp(comando, "exit") == 0 || strcmp(comando, "EXIT") == 0) {
             if (total_imagenes_enviadas == 0) {
@@ -451,6 +491,11 @@ int main() {
         exit(1);
     }
     
+    // *** NUEVA FUNCIONALIDAD: LIMPIAR BUFFER DESPUÉS DE CONECTAR ***
+    printf("Conexión establecida exitosamente.\n");
+    limpiar_buffer_socket(sockfd);
+    printf("Conexión lista para usar.\n\n");
+    
     // Iniciar sesión interactiva
     cliente_interactivo(sockfd);
     
@@ -459,27 +504,3 @@ int main() {
     close(sockfd);
     return 0;
 }
-
-/*
-COMPILACIÓN:
-gcc cn.c -o cliente -lm -lpthread
-
-FUNCIONAMIENTO SECUENCIAL CON TERMINACIÓN AUTOMÁTICA:
-1. Cliente se conecta al servidor
-2. Usuario envía imágenes una por una con "enviar <archivo>"
-3. Cada imagen se almacena en el servidor (no se procesa aún)
-4. Usuario escribe "exit" cuando termina de enviar
-5. Servidor procesa todas las imágenes por orden de prioridad (tamaño)
-6. Cliente recibe todas las imágenes procesadas secuencialmente
-7. Se guardan como "processed_image_X_timestamp.jpg"
-8. AUTOMÁTICAMENTE termina el programa con exit(0)
-
-CAMBIO CLAVE:
-- Al final de recibir_imagenes_procesadas() se usa exit(0)
-- Esto termina completamente el programa sin esperar más entrada
-- No necesita Ctrl+C manual
-*/
-
-/*
-error en el primer comando de cliente
-*/

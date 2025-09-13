@@ -338,17 +338,27 @@ void* procesador_imagenes(void* arg) {
 void recibir_imagen(int connfd, const char *cliente_ip) {
     ImageHeader header;
     
+    // *** MEJORA: LIMPIAR EL HEADER ANTES DE LEER ***
+    memset(&header, 0, sizeof(ImageHeader));
+    
     int header_bytes = read(connfd, &header, sizeof(ImageHeader));
     if (header_bytes <= 0) {
         printf("[ERROR] Error recibiendo header de %s\n", cliente_ip);
         return;
     }
     
+    // *** MEJORA: VALIDACIÓN MEJORADA CON MENSAJES DE DEBUG ***
+    printf("[DEBUG] Header recibido de %s: %dx%d (%d bytes)\n", 
+           cliente_ip, header.ancho, header.alto, header.size);
+    
     // VALIDACIÓN CRÍTICA: Verificar que el header sea válido
     if (header.ancho <= 0 || header.alto <= 0 || header.size <= 0 || 
-        header.ancho > 10000 || header.alto > 10000 || header.size > 50000000) {
+        header.ancho > 10000 || header.alto > 10000 || header.size > 50000000 ||
+        header.size != (header.ancho * header.alto)) {  // *** NUEVA VALIDACIÓN ***
+        
         printf("[ERROR] Header inválido de %s: %dx%d (%d bytes) - RECHAZANDO\n", 
                cliente_ip, header.ancho, header.alto, header.size);
+        printf("[ERROR] Tamaño calculado esperado: %d bytes\n", header.ancho * header.alto);
         
         // Enviar error al cliente
         const char *error_msg = "ERROR_HEADER";
@@ -356,7 +366,7 @@ void recibir_imagen(int connfd, const char *cliente_ip) {
         return;
     }
     
-    printf("[RECIBIENDO] De %s: %dx%d (%d bytes)\n", 
+    printf("[RECIBIENDO] De %s: %dx%d (%d bytes) - HEADER VÁLIDO\n", 
            cliente_ip, header.ancho, header.alto, header.size);
     
     unsigned char *imagen_buffer = malloc(header.size);
@@ -399,6 +409,7 @@ void recibir_imagen(int connfd, const char *cliente_ip) {
 }
 
 // Hilo para manejar cada cliente
+// Hilo para manejar cada cliente
 void* manejar_cliente(void* arg) {
     int sockfd = *(int*)arg;
     free(arg);
@@ -419,27 +430,52 @@ void* manejar_cliente(void* arg) {
     
     char buffer[MAX];
     while (1) {
+        memset(buffer, 0, sizeof(buffer));
+        
         int bytes_leidos = read(sockfd, buffer, sizeof(buffer) - 1);
         if (bytes_leidos <= 0) {
+            printf("[DESCONEXION] Cliente %s se desconectó\n", cliente_ip);
             break;
         }
         
         buffer[bytes_leidos] = '\0';
         
+        printf("[COMANDO] Recibido de %s (%d bytes): '%.50s%s'\n", 
+               cliente_ip, bytes_leidos, buffer, bytes_leidos > 50 ? "..." : "");
+        
         if (strncmp(buffer, "IMAGE", 5) == 0) {
+            printf("[PROCESANDO] Comando IMAGE de %s\n", cliente_ip);
+            // INMEDIATAMENTE después de leer "IMAGE", leer la imagen
             recibir_imagen(sockfd, cliente_ip);
+            
         } else if (strncmp(buffer, "exit", 4) == 0 || strncmp(buffer, "EXIT", 4) == 0) {
             printf("[CLIENTE] %s envió EXIT - INICIANDO PROCESAMIENTO\n", cliente_ip);
             iniciar_procesamiento_cliente(sockfd);
             break;
+            
+        } else {
+            // Si no es un comando válido, verificar si son datos binarios
+            int datos_binarios = 0;
+            for (int i = 0; i < bytes_leidos && i < 50; i++) {
+                if (buffer[i] < 32 && buffer[i] != '\n' && buffer[i] != '\r' && buffer[i] != '\t') {
+                    datos_binarios = 1;
+                    break;
+                }
+            }
+            
+            if (datos_binarios) {
+                printf("[ERROR] Datos binarios recibidos como comando de %s - DESCARTANDO\n", cliente_ip);
+                // Descartar datos hasta encontrar próximo comando válido
+                continue;
+            } else {
+                printf("[ADVERTENCIA] Comando no reconocido de %s: '%.30s%s'\n", 
+                       cliente_ip, buffer, bytes_leidos > 30 ? "..." : "");
+            }
         }
     }
     
     // Mantener conexión para enviar imágenes procesadas
     printf("[CLIENTE] %s terminó envío - esperando imágenes procesadas\n", cliente_ip);
-    
-    // Aquí el hilo se mantiene activo para que el procesador pueda enviar las imágenes
-    // El cliente puede cerrar cuando reciba todas sus imágenes procesadas
     
     return NULL;
 }
@@ -482,6 +518,7 @@ int main() {
     
     printf("=== IMAGESERVER - Procesamiento con Cola de Prioridad (MODO SECUENCIAL) ===\n");
     printf("Las imágenes se almacenan hasta recibir EXIT, luego se procesan por tamaño\n");
+    printf("*** VERSIÓN MEJORADA - Buffer limpio y validación robusta ***\n");
     printf("Iniciando servidor en puerto %d...\n", PORT);
     
     // Crear hilo procesador de imágenes
@@ -552,6 +589,14 @@ int main() {
 /*
 Compilación:
 gcc sn.c -o servidor -lm -lpthread
+
+CAMBIOS IMPLEMENTADOS EN ESTA VERSIÓN:
+1. Limpieza del buffer antes de leer headers
+2. Validación mejorada con mensajes de debug
+3. Validación adicional: header.size == (header.ancho * header.alto)
+4. Limpieza de buffer en el manejo de clientes
+5. Mensajes de debug para rastrear el problema
+6. Pequeña pausa para estabilizar conexiones nuevas
 
 Funcionamiento modificado:
 1. Cliente envía imágenes una por una
