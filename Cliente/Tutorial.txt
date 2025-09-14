@@ -1,0 +1,76 @@
+----------------------------------------------------------------
+
+Primera parte - Realizar el Makefile
+
+Comando para generar el makefile del cliente y el servidor automáticamente:
+echo -e "CC=gcc\nCFLAGS=-Wall\n\nall: cliente servidor\n\ncliente: cn.c\n\t\$(CC) \$(CFLAGS) -o cliente cn.c -lm\n\nservidor: sn.c\n\t\$(CC) \$(CFLAGS) -o servidor sn.c -lm\n\nrun-cliente: cliente\n\t./cliente\n\nrun-servidor: servidor\n\t./servidor\n\nclean:\n\trm -f cliente servidor" > Makefile
+
+Entrar a Makefile y agregar (Solo si es necesario)
+gcc sn.c -o servidor -lm -lpthread
+gcc cn.c -o cliente -lm -lpthread 
+
+Después de ejecutar el comando, ejecutar los siguiente:
+make
+make run-servidor
+make run-cliente (Así se corre el cliente de ahora en adelante)
+
+----------------------------------------------------------------
+
+Segunda parte - SystemD
+
+Servidor local
+1. Crear archivo de servicio
+
+Ejecutar: sudo nano /etc/systemd/system/sn.c.service
+Agregar esto: 
+
+[Unit]
+Description=Servidor de procesamiento de imágenes
+After=network.target
+
+[Service]
+Type=simple
+User=mimi
+WorkingDirectory=/home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Vargas_Noem-Vargas/Cliente
+ExecStartPre=/usr/bin/make -C /home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Vargas_Noem-Vargas/Cliente
+ExecStart=/home/mimi/Documents/Tarea1_Operativos/Codigo/Tarea1_Jos-Vargas_Noem-Vargas/Cliente/servidor
+Restart=on-failure
+
+
+[Install]
+WantedBy=multi-user.target
+
+2. Habilitar y probar
+
+# Recargar systemd para reconocer el nuevo servicio
+sudo systemctl daemon-reload
+
+# Habilitar para que arranque con el sistema
+sudo systemctl enable s.c.service
+
+# Iniciar ahora mismo
+sudo systemctl start s.c.service
+
+# Verificar estado y logs (verificar en tiempo real)
+sudo systemctl status s.c.service
+journalctl -u s.c.service -f
+
+----------------------------------------------------------------
+
+Tercera parte - Archivo de configuración y archivo de logs
+
+sudo mkdir -p /etc/server
+echo -e "PORT=8080\nLOGFILE=/var/log/servidor.log" | sudo tee /etc/server/config.conf  (Este comando genera algo básico con el puerto y el archivo .log)
+sudo touch /var/log/servidor.log
+sudo chmod 666 /var/log/servidor.log   # para que puedas escribir desde tu usuario
+
+Ver/Leer el archivo log
+cat /var/log/servidor.log
+tail -f /var/log/servidor.log
+
+Ver archivo config.conf
+cat /etc/server/config.conf
+
+Editar el archivo
+sudo nano /etc/server/config.conf
+
