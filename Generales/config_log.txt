@@ -1,0 +1,11 @@
+archivo config
+sudo mkdir -p /etc/server
+echo -e "PORT=8080\nLOGFILE=/var/log/servidor.log" | sudo tee /etc/server/config.conf
+sudo touch /var/log/servidor.log
+sudo chmod 666 /var/log/servidor.log   # para que puedas escribir desde tu usuario
+
+
+
+Ver/Leer el archivo log
+cat /var/log/servidor.log
+tail -f /var/log/servidor.log
