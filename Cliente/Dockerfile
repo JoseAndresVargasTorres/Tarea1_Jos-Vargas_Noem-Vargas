@@ -1,14 +1,30 @@
-# Dockerfile para client.c
+# Dockerfile para cliente de procesamiento de imágenes RGB
 FROM gcc:latest
 
-# Crear directorio de trabajo dentro del contenedor
+# Instalar dependencias necesarias
+RUN apt-get update && apt-get install -y \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crear directorio de trabajo
 WORKDIR /app
 
-# Copiar el código fuente del cliente al contenedor
-COPY client.c .
+# Crear directorio para imágenes
+RUN mkdir -p /app/images
 
-# Compilar el cliente
-RUN gcc client.c -o client
+# Copiar archivos del cliente
+COPY cn.c .
+COPY stb_image.h .
+COPY Makefile .
 
-# El contenedor se ejecutará iniciando el cliente
-ENTRYPOINT ["./client"]
+# Copiar imágenes de prueba al contenedor
+COPY images/ /app/images/
+
+# Compilar el cliente usando el Makefile
+RUN make cliente
+
+# Configurar variables de entorno
+ENV IMAGES_DIRECTORY=/app/images
+
+# El contenedor ejecutará el cliente interactivamente
+CMD ["./cliente"]

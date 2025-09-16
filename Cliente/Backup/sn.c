@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <math.h>
-#include <errno.h>
 #define MAX 80
 #define PORT 1717
 #define SA struct sockaddr
@@ -20,18 +19,6 @@
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-
-
-// Estructura para configuración
-typedef struct {
-    int puerto;
-    char dir_colores[256];
-    char dir_histograma[256];
-    char archivo_log[256];
-} ServerConfig;
-
-// Variables globales de configuración
-ServerConfig config;
 
 // Estructura para información de imagen RGB
 typedef struct {
@@ -87,101 +74,6 @@ void mostrar_estadisticas();
 ClientSession* encontrar_cliente(int sockfd);
 void crear_cliente(int sockfd, const char *cliente_ip);
 void remover_cliente(int sockfd);
-
-// Función para leer archivo de configuración
-int leer_configuracion(const char *archivo_config) {
-    FILE *file = fopen(archivo_config, "r");
-    if (!file) {
-        printf("[ERROR] No se puede abrir archivo de configuración: %s\n", archivo_config);
-        printf("[INFO] Usando valores por defecto\n");
-        config.puerto = 1717;
-        strcpy(config.dir_colores, "./");
-        strcpy(config.dir_histograma, "./img_ecualizadas");
-        strcpy(config.archivo_log, "/var/log/servidor.log");
-        return -1;
-    }
-
-      char linea[256];
-    printf("[CONFIG] Leyendo configuración desde: %s\n", archivo_config);
-    
-    // Valores por defecto
-    config.puerto = 1717;
-    strcpy(config.dir_colores, "./");
-    strcpy(config.dir_histograma, "./img_ecualizadas");
-    strcpy(config.archivo_log, "/var/log/servidor.log");
-    
-    while (fgets(linea, sizeof(linea), file)) {
-        // Remover salto de línea
-        linea[strcspn(linea, "\n")] = 0;
-        
-        // Saltar líneas vacías y comentarios
-        if (strlen(linea) == 0 || linea[0] == '#') continue;
-        
-        // Parsear configuración
-        if (strncmp(linea, "Puerto:", 7) == 0) {
-            config.puerto = atoi(linea + 7);
-        } else if (strncmp(linea, "PORT=", 5) == 0) {
-            config.puerto = atoi(linea + 5);
-        } else if (strncmp(linea, "DirColores:", 11) == 0) {
-            strcpy(config.dir_colores, linea + 11);
-        } else if (strncmp(linea, "DirHisto:", 9) == 0) {
-            strcpy(config.dir_histograma, linea + 9);
-        } else if (strncmp(linea, "DirLog:", 7) == 0) {
-            strcpy(config.archivo_log, linea + 7);
-        } else if (strncmp(linea, "LOGFILE=", 8) == 0) {
-            strcpy(config.archivo_log, linea + 8);
-        }
-    }
-    
-    fclose(file);
-    
-    printf("[CONFIG] Configuración cargada:\n");
-    printf("         Puerto: %d\n", config.puerto);
-    printf("         Dir Colores: %s\n", config.dir_colores);
-    printf("         Dir Histograma: %s\n", config.dir_histograma);
-    printf("         Archivo Log: %s\n", config.archivo_log);
-    
-    return 0;
-}
-
-// Función para escribir en log
-void escribir_log(const char *cliente_ip, const char *archivo, const char *estado, const char *accion) {
-    FILE *log_file = fopen(config.archivo_log, "a");
-    if (!log_file) {
-        printf("[ERROR] No se puede escribir en log: %s\n", config.archivo_log);
-        return;
-    }
-    
-    time_t now = time(NULL);
-    char *fecha = ctime(&now);
-    fecha[strlen(fecha) - 1] = '\0'; // Remover \n
-    
-    fprintf(log_file, "[%s] Cliente: %s | Archivo: %s | Acción: %s | Estado: %s\n", 
-            fecha, cliente_ip, archivo, accion, estado);
-    fclose(log_file);
-    
-    printf("[LOG] %s - %s: %s (%s)\n", cliente_ip, archivo, accion, estado);
-}
-
-// Función para crear directorios basados en configuración
-void crear_directorios_config() {
-    char ruta_verde[512], ruta_azul[512], ruta_rojo[512];
-    
-    snprintf(ruta_verde, sizeof(ruta_verde), "%s/verde", config.dir_colores);
-    snprintf(ruta_azul, sizeof(ruta_azul), "%s/azul", config.dir_colores);
-    snprintf(ruta_rojo, sizeof(ruta_rojo), "%s/rojo", config.dir_colores);
-    
-    mkdir(ruta_verde, 0755);
-    mkdir(ruta_azul, 0755);
-    mkdir(ruta_rojo, 0755);
-    mkdir(config.dir_histograma, 0755);
-    
-    printf("[SETUP] Directorios creados:\n");
-    printf("        %s\n", ruta_verde);
-    printf("        %s\n", ruta_azul);
-    printf("        %s\n", ruta_rojo);
-    printf("        %s\n", config.dir_histograma);
-}
 
 // FUNCIÓN: Crear directorios incluyendo img_ecualizadas
 void crear_directorios_colores() {
@@ -430,7 +322,7 @@ void iniciar_procesamiento_cliente(int sockfd) {
     pthread_cond_broadcast(&cola_condition);
 }
 
-
+// FUNCIÓN CORREGIDA: Procesador SOLO guarda en los directorios correctos
 void* procesador_imagenes(void* arg) {
     while (servidor_activo) {
         pthread_mutex_lock(&cola_mutex);
@@ -453,27 +345,13 @@ void* procesador_imagenes(void* arg) {
                tarea->filename, tarea->cliente_ip, 
                tarea->header.ancho, tarea->header.alto, tarea->header.size);
         
-        // LOG: Inicio de procesamiento
-        escribir_log(tarea->cliente_ip, tarea->filename, "PROCESANDO", "Iniciando procesamiento de imagen");
-        
-        // PASO 1: Clasificar color usando datos RGB en memoria
+        // PASO 1: Clasificar color usando datos RGB en memoria (SIN archivos temporales)
         printf("[CLASIFICACION] Usando datos RGB en memoria\n");
-        escribir_log(tarea->cliente_ip, tarea->filename, "CLASIFICANDO", "Analizando color predominante RGB");
-        
         const char *color_dir = clasificar_color_predominante_rgb(tarea->rgb_data, 
                                                                  tarea->header.ancho, tarea->header.alto);
         
-        // LOG: Color clasificado
-        char color_info[256];
-        snprintf(color_info, sizeof(color_info), "Color predominante detectado: %s", color_dir);
-        escribir_log(tarea->cliente_ip, tarea->filename, "CLASIFICADO", color_info);
-        
-        // PASO 2: Aplicar histograma de ecualización
-        printf("[HISTOGRAMA] Aplicando ecualización a imagen en escala de grises\n");
-        escribir_log(tarea->cliente_ip, tarea->filename, "HISTOGRAMA", "Aplicando ecualización de histograma");
-        
+        // PASO 2: Aplicar histograma de ecualización a datos en escala de grises
         Histograma_Ecualizacion(tarea->data, tarea->header.ancho, tarea->header.alto);
-        escribir_log(tarea->cliente_ip, tarea->filename, "HISTOGRAMA", "Ecualización de histograma completada");
         
         // PASO 3: Generar nombre base para archivos
         char nombre_base[256];
@@ -486,56 +364,38 @@ void* procesador_imagenes(void* arg) {
             snprintf(nombre_base, sizeof(nombre_base), "%s_processed_%ld", tarea->filename, time(NULL));
         }
         
-        // PASO 4: Guardar en directorio por color (usando configuración)
-        char ruta_color[1024];  // Aumentar tamaño
-        snprintf(ruta_color, sizeof(ruta_color), "%s/%s/%s.jpg", config.dir_colores, color_dir, nombre_base);
-        
-        printf("[GUARDANDO] En directorio de color: %s\n", ruta_color);
-        escribir_log(tarea->cliente_ip, tarea->filename, "GUARDANDO_COLOR", "Guardando en directorio por color");
+        // PASO 4: Guardar SOLO en directorio por color (clasificación)
+        char ruta_color[512];
+        snprintf(ruta_color, sizeof(ruta_color), "%s/%s.jpg", color_dir, nombre_base);
         
         int guardado_color = stbi_write_jpg(ruta_color, tarea->header.ancho, tarea->header.alto, 1, tarea->data, 90);
         if (guardado_color) {
             printf("[GUARDADO COLOR] %s → %s\n", tarea->filename, ruta_color);
-            escribir_log(tarea->cliente_ip, tarea->filename, "GUARDADO_COLOR", ruta_color);
         } else {
             printf("[ERROR COLOR] No se pudo guardar: %s\n", ruta_color);
-            escribir_log(tarea->cliente_ip, tarea->filename, "ERROR_COLOR", ruta_color);
         }
         
-               // PASO 5: Guardar en directorio general (usando configuración)
-        char ruta_general[1024];  // Aumentar tamaño
-        snprintf(ruta_general, sizeof(ruta_general), "%s/%s.jpg", config.dir_histograma, nombre_base);
-        
-        printf("[GUARDANDO] En directorio general: %s\n", ruta_general);
-        escribir_log(tarea->cliente_ip, tarea->filename, "GUARDANDO_GENERAL", "Guardando en directorio de ecualizadas");
+        // PASO 5: Guardar SOLO en img_ecualizadas (TODAS las imágenes procesadas)
+        char ruta_general[512];
+        snprintf(ruta_general, sizeof(ruta_general), "img_ecualizadas/%s.jpg", nombre_base);
         
         int guardado_general = stbi_write_jpg(ruta_general, tarea->header.ancho, tarea->header.alto, 1, tarea->data, 90);
         if (guardado_general) {
             printf("[GUARDADO GENERAL] %s → %s\n", tarea->filename, ruta_general);
-            escribir_log(tarea->cliente_ip, tarea->filename, "GUARDADO_GENERAL", ruta_general);
         } else {
             printf("[ERROR GENERAL] No se pudo guardar: %s\n", ruta_general);
-            escribir_log(tarea->cliente_ip, tarea->filename, "ERROR_GENERAL", ruta_general);
         }
         
-        // VERIFICACIÓN: Confirmar guardado
+        // VERIFICACIÓN: Confirmar guardado SOLO en directorios correctos
         if (guardado_color && guardado_general) {
             printf("[GUARDADO CORRECTO] ✓ Color: %s | ✓ General: %s\n", ruta_color, ruta_general);
             printf("[CONFIRMADO] Imagen guardada ÚNICAMENTE en directorios designados\n");
-            escribir_log(tarea->cliente_ip, tarea->filename, "GUARDADO_EXITOSO", "Imagen guardada correctamente en ambos directorios");
         } else {
             printf("[ADVERTENCIA] Guardado parcial - Color: %s | General: %s\n", 
                    guardado_color ? "OK" : "FALLO", guardado_general ? "OK" : "FALLO");
-            char error_guardado[256];
-            snprintf(error_guardado, sizeof(error_guardado), "Guardado parcial - Color: %s, General: %s", 
-                    guardado_color ? "OK" : "FALLO", guardado_general ? "OK" : "FALLO");
-            escribir_log(tarea->cliente_ip, tarea->filename, "GUARDADO_PARCIAL", error_guardado);
         }
         
         // PASO 6: Enviar imagen procesada al cliente
-        printf("[ENVIANDO] Devolviendo imagen procesada al cliente\n");
-        escribir_log(tarea->cliente_ip, tarea->filename, "ENVIANDO", "Enviando imagen procesada al cliente");
-        
         if (write(tarea->sockfd, &tarea->header, sizeof(ImageHeader)) > 0) {
             int bytes_enviados = 0;
             while (bytes_enviados < tarea->header.size) {
@@ -543,38 +403,21 @@ void* procesador_imagenes(void* arg) {
                 int chunk_size = (bytes_restantes > 4096) ? 4096 : bytes_restantes;
                 
                 int resultado = write(tarea->sockfd, tarea->data + bytes_enviados, chunk_size);
-                if (resultado <= 0) {
-                    escribir_log(tarea->cliente_ip, tarea->filename, "ERROR_ENVIO", "Error enviando imagen al cliente");
-                    break;
-                }
+                if (resultado <= 0) break;
                 bytes_enviados += resultado;
             }
-            
-            if (bytes_enviados == tarea->header.size) {
-                printf("[ENVIADO] Imagen procesada devuelta al cliente (%d bytes)\n", bytes_enviados);
-                escribir_log(tarea->cliente_ip, tarea->filename, "ENVIADO", "Imagen procesada enviada exitosamente al cliente");
-            }
-        } else {
-            printf("[ERROR ENVIO] No se pudo enviar imagen al cliente\n");
-            escribir_log(tarea->cliente_ip, tarea->filename, "ERROR_ENVIO", "No se pudo enviar header al cliente");
+            printf("[ENVIADO] Imagen procesada devuelta al cliente\n");
         }
         
         imagenes_procesadas++;
         
-        // LOG: Procesamiento completado
-        char completado_info[256];
-        snprintf(completado_info, sizeof(completado_info), "Procesamiento completado (Total procesadas: %d)", imagenes_procesadas);
-        escribir_log(tarea->cliente_ip, tarea->filename, "COMPLETADO", completado_info);
-        
-        // PASO 7: Liberar memoria
+        // PASO 7: Liberar memoria (NO hay archivos temporales que eliminar)
         free(tarea->data);
         free(tarea->rgb_data);
         free(tarea);
         
-        printf("[COMPLETADO] Imagen procesada sin archivos temporales (Total: %d)\n", imagenes_procesadas);
+        printf("[COMPLETADO] Imagen procesada sin archivos temporales\n");
     }
-    
-    escribir_log("SERVIDOR", "PROCESADOR", "DETENIDO", "Hilo procesador de imágenes finalizado");
     return NULL;
 }
 
@@ -583,13 +426,9 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
     ImageHeader header;
     memset(&header, 0, sizeof(ImageHeader));
     
-    // LOG: Inicio de recepción
-    escribir_log(cliente_ip, "IMAGEN", "RECIBIENDO", "Iniciando recepción de imagen RGB");
-    
     int header_bytes = read(connfd, &header, sizeof(ImageHeader));
     if (header_bytes <= 0) {
         printf("[ERROR] Error recibiendo header RGB de %s\n", cliente_ip);
-        escribir_log(cliente_ip, "HEADER", "ERROR", "Error recibiendo header RGB");
         return;
     }
     
@@ -604,31 +443,18 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
         printf("[ERROR] Header RGB inválido de %s: %dx%d, %d canales (%d bytes)\n", 
                cliente_ip, header.ancho, header.alto, header.canales, header.size);
         
-        // LOG: Header inválido
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Header inválido: %dx%d, %d canales", 
-                header.ancho, header.alto, header.canales);
-        escribir_log(cliente_ip, "HEADER", "ERROR", error_msg);
-        
-        const char *error_response = "ERROR_HEADER";
-        write(connfd, error_response, strlen(error_response));
+        const char *error_msg = "ERROR_HEADER";
+        write(connfd, error_msg, strlen(error_msg));
         return;
     }
     
     printf("[RECIBIENDO] RGB de %s: %dx%d, %d canales (%d bytes) - VÁLIDO\n", 
            cliente_ip, header.ancho, header.alto, header.canales, header.size);
     
-    // LOG: Header válido
-    char header_info[256];
-    snprintf(header_info, sizeof(header_info), "Header válido recibido: %dx%d", 
-            header.ancho, header.alto);
-    escribir_log(cliente_ip, "HEADER", "VALIDO", header_info);
-    
     // Alocar memoria para datos RGB
     unsigned char *imagen_rgb_buffer = malloc(header.size);
     if (!imagen_rgb_buffer) {
         printf("[ERROR] Memoria insuficiente para RGB de %s\n", cliente_ip);
-        escribir_log(cliente_ip, "MEMORIA", "ERROR", "Memoria insuficiente para imagen RGB");
         const char *error_msg = "ERROR_MEMORIA";
         write(connfd, error_msg, strlen(error_msg));
         return;
@@ -642,7 +468,6 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
         
         if (resultado <= 0) {
             printf("[ERROR] Fallo recibiendo datos RGB de %s\n", cliente_ip);
-            escribir_log(cliente_ip, "DATOS_RGB", "ERROR", "Fallo recibiendo datos RGB del cliente");
             free(imagen_rgb_buffer);
             const char *error_msg = "ERROR_DATOS";
             write(connfd, error_msg, strlen(error_msg));
@@ -653,11 +478,6 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
     }
     
     printf("[RECIBIDO] %d bytes RGB completos de %s\n", bytes_recibidos, cliente_ip);
-    
-    // LOG: Datos recibidos exitosamente
-    char bytes_info[256];
-    snprintf(bytes_info, sizeof(bytes_info), "%d bytes RGB recibidos exitosamente", bytes_recibidos);
-    escribir_log(cliente_ip, "DATOS_RGB", "RECIBIDO", bytes_info);
     
     // Verificar datos RGB recibidos
     printf("[VERIFICACION] Primeros 3 pixels RGB recibidos:\n");
@@ -673,8 +493,6 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
     unsigned char *imagen_gris = malloc(pixels_grises);
     
     printf("[CONVERSION] Convirtiendo RGB a escala de grises (EN MEMORIA)...\n");
-    escribir_log(cliente_ip, "CONVERSION", "PROCESANDO", "Convirtiendo RGB a escala de grises");
-    
     for (int i = 0; i < pixels_grises; i++) {
         int r = imagen_rgb_buffer[i*3 + 0];
         int g = imagen_rgb_buffer[i*3 + 1];
@@ -684,7 +502,6 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
         imagen_gris[i] = (unsigned char)(0.299 * r + 0.587 * g + 0.114 * b);
     }
     printf("[CONVERSION] RGB convertido a escala de grises exitosamente (SIN archivos temporales)\n");
-    escribir_log(cliente_ip, "CONVERSION", "COMPLETADO", "Conversión RGB a escala de grises exitosa");
     
     // Crear header para datos en escala de grises
     ImageHeader header_gris = header;
@@ -699,16 +516,10 @@ void recibir_imagen_rgb(int connfd, const char *cliente_ip) {
     free(imagen_rgb_buffer); // Se libera aquí porque ya se copió en insertar_en_cola_cliente
     free(imagen_gris);       // Se libera aquí porque ya se copió en insertar_en_cola_cliente
     
-    // LOG: Imagen procesada exitosamente
-    escribir_log(cliente_ip, filename, "RECIBIDA", "Imagen RGB recibida y almacenada en memoria");
-    
     // Confirmar recepción
     const char *confirmacion = "OK";
     write(connfd, confirmacion, strlen(confirmacion) + 1);
     printf("[CONFIRMADO] Imagen RGB procesada y almacenada en memoria para %s\n", cliente_ip);
-    
-    // LOG: Confirmación enviada
-    escribir_log(cliente_ip, filename, "CONFIRMADO", "Confirmación OK enviada al cliente");
 }
 
 void* manejar_cliente(void* arg) {
@@ -807,34 +618,26 @@ void mostrar_estadisticas() {
 }
 
 int main() {
-    int sockfd;
-    socklen_t len;
-
+    int sockfd, len;
     struct sockaddr_in servaddr, cli;
     
-    printf("=== IMAGESERVER RGB CON CONFIGURACIÓN ===\n");
-    
-    // Leer configuración
-    leer_configuracion("/etc/server/config.conf");
-    
-    // Escribir inicio en log
-    escribir_log("SERVIDOR", "SISTEMA", "INICIADO", "Servidor ImageServer iniciado");
-    
+    printf("=== IMAGESERVER RGB LIMPIO - Solo directorios designados ===\n");
     printf("• Recibe imágenes RGB reales del cliente\n");
     printf("• Clasifica por color predominante RGB (EN MEMORIA)\n");
     printf("• Aplica histograma de ecualización\n");
-    printf("• Puerto configurado: %d\n", config.puerto);
-    printf("• Archivo de log: %s\n", config.archivo_log);
-    printf("Iniciando servidor...\n\n");
+    printf("• Guarda ÚNICAMENTE en:\n");
+    printf("  - Directorios por color: verde/, azul/, rojo/\n");
+    printf("  - Directorio general: img_ecualizadas/\n");
+    printf("• SIN archivos temporales en directorio raíz\n");
+    printf("Iniciando servidor en puerto %d...\n\n", PORT);
     
-    crear_directorios_config();
+    crear_directorios_colores();
     
     pthread_t procesador_thread;
     pthread_create(&procesador_thread, NULL, procesador_imagenes, NULL);
     
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
-        escribir_log("SERVIDOR", "SOCKET", "ERROR", "Error creando socket");
         printf("Error creando socket\n");
         exit(0);
     }
@@ -845,22 +648,25 @@ int main() {
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(config.puerto);  // Usar puerto de configuración
+    servaddr.sin_port = htons(PORT);
     
     if (bind(sockfd, (SA*)&servaddr, sizeof(servaddr)) != 0) {
-        escribir_log("SERVIDOR", "BIND", "ERROR", "Error en bind");
         printf("Error en bind\n");
         exit(0);
     }
     
     if (listen(sockfd, 5) != 0) {
-        escribir_log("SERVIDOR", "LISTEN", "ERROR", "Error en listen");
         printf("Error en listen\n");
         exit(0);
     }
     
-    printf("Servidor ImageServer escuchando en puerto %d...\n", config.puerto);
-    escribir_log("SERVIDOR", "PUERTO", "ACTIVO", "Servidor escuchando");
+    printf("Servidor RGB LIMPIO escuchando...\n");
+    printf("Flujo: Recibir RGB → Mantener en memoria → Clasificar → Convertir a gris → Histograma → Guardar SOLO en directorios designados\n");
+    printf("Garantía: NO se crean archivos temporales en directorio raíz\n");
+    printf("Guardado ÚNICAMENTE en:\n");
+    printf("  • Por color: verde/, azul/, rojo/ (clasificación por RGB)\n");
+    printf("  • General: img_ecualizadas/ (TODAS las imágenes procesadas)\n");
+    printf("Presiona Ctrl+C para estadísticas\n\n");
     
     while (1) {
         len = sizeof(cli);
@@ -881,7 +687,6 @@ int main() {
         }
     }
     
-    escribir_log("SERVIDOR", "SISTEMA", "DETENIDO", "Servidor ImageServer detenido");
     servidor_activo = 0;
     pthread_cond_broadcast(&cola_condition);
     pthread_join(procesador_thread, NULL);

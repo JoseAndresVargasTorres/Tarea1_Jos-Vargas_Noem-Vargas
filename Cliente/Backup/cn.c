@@ -9,7 +9,6 @@
 #include <dirent.h>
 #include <time.h>
 #include <sys/select.h>
-#include <sys/stat.h>
 #define MAX 80
 #define SA struct sockaddr
 
@@ -37,36 +36,16 @@ ImageRecord *imagenes_enviadas = NULL;
 int total_imagenes_enviadas = 0;
 int imagenes_recibidas = 0;
 
-// DIRECTORIO DE IMÁGENES - CONFIGURABLE
-const char *IMAGES_DIRECTORY = "./images";  // Cambiado de /ImagesToChange a ./images
-
 // Declaraciones de funciones
 void enviar_imagen_rgb(int sockfd, const char *nombre_archivo);
 void recibir_imagenes_procesadas(int sockfd);
-int mostrar_imagenes_disponibles();
+void mostrar_imagenes_disponibles();
 void mostrar_menu();
 void mostrar_banner();
 unsigned char* cargar_imagen_rgb_real(const char *nombre_imagen, int *ancho, int *alto);
 void agregar_imagen_enviada(const char *filename);
 void mostrar_progreso_recepcion();
 void limpiar_buffer_socket(int sockfd);
-int verificar_archivo_existe(const char *ruta);
-void crear_directorio_imagenes();
-
-void crear_directorio_imagenes() {
-    struct stat st = {0};
-    if (stat(IMAGES_DIRECTORY, &st) == -1) {
-        printf("[SETUP] Creando directorio de imágenes: %s\n", IMAGES_DIRECTORY);
-        if (mkdir(IMAGES_DIRECTORY, 0755) == -1) {
-            printf("[ADVERTENCIA] No se pudo crear el directorio %s\n", IMAGES_DIRECTORY);
-        }
-    }
-}
-
-int verificar_archivo_existe(const char *ruta) {
-    struct stat buffer;
-    return (stat(ruta, &buffer) == 0);
-}
 
 void limpiar_buffer_socket(int sockfd) {
     printf("Limpiando buffer del socket...\n");
@@ -97,142 +76,70 @@ void agregar_imagen_enviada(const char *filename) {
 }
 
 void mostrar_banner() {
-    printf("╔═══════════════════════════════════════════════════════════════════╗\n");
+    printf("╔══════════════════════════════════════════════════════════════════╗\n");
     printf("║                CLIENTE PROCESAMIENTO IMÁGENES RGB REAL           ║\n");
     printf("║                     Instituto Tecnológico CR                    ║\n");
-    printf("║                    Versión 4.1 - SIN GUARDADO LOCAL             ║\n");
-    printf("╚═══════════════════════════════════════════════════════════════════╝\n\n");
+    printf("║                    Versión 4.0 - SIN GUARDADO LOCAL             ║\n");
+    printf("╚══════════════════════════════════════════════════════════════════╝\n\n");
 }
 
-int mostrar_imagenes_disponibles() {
+void mostrar_imagenes_disponibles() {
     DIR *dir;
     struct dirent *entry;
     int count = 0;
     
-    printf("┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("┌───────────────────────────────────────────────────────────────────┐\n");
     printf("│                    IMÁGENES DISPONIBLES                         │\n");
-    printf("│                   Directorio: %-31s │\n", IMAGES_DIRECTORY);
-    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    printf("├───────────────────────────────────────────────────────────────────┤\n");
     
-    dir = opendir(IMAGES_DIRECTORY);
-    if (dir == NULL) {
-        printf("│  ERROR: No se puede abrir el directorio %s                │\n", IMAGES_DIRECTORY);
-        printf("│  Verificando directorios alternativos...                       │\n");
-        
-        // Intentar con directorios alternativos
-        const char *directorios_alternativos[] = {
-            "./",
-            "/ImagesToChange",
-            "./ImagesToChange",
-            "../images",
-            NULL
-        };
-        
-        for (int i = 0; directorios_alternativos[i] != NULL; i++) {
-            dir = opendir(directorios_alternativos[i]);
-            if (dir != NULL) {
-                printf("│  Usando directorio alternativo: %-27s │\n", directorios_alternativos[i]);
-                IMAGES_DIRECTORY = directorios_alternativos[i];
-                break;
-            }
-        }
-        
-        if (dir == NULL) {
-            printf("│  No se encontraron directorios con imágenes                    │\n");
-            printf("│  Creando directorio ./images por defecto...                    │\n");
-            crear_directorio_imagenes();
-            printf("│  Coloque sus imágenes en el directorio ./images                │\n");
-            printf("└─────────────────────────────────────────────────────────────────┘\n");
-            return 0;
-        }
-    }
-    
-    while ((entry = readdir(dir)) != NULL) {
-        char *ext = strrchr(entry->d_name, '.');
-        if (ext != NULL) {
-            if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0 || 
-                strcasecmp(ext, ".png") == 0 || strcasecmp(ext, ".gif") == 0) {
-                
-                // Verificar que el archivo realmente existe
-                char ruta_completa[512];
-                snprintf(ruta_completa, sizeof(ruta_completa), "%s/%s", IMAGES_DIRECTORY, entry->d_name);
-                
-                if (verificar_archivo_existe(ruta_completa)) {
+    dir = opendir(".");
+    if (dir != NULL) {
+        while ((entry = readdir(dir)) != NULL) {
+            char *ext = strrchr(entry->d_name, '.');
+            if (ext != NULL) {
+                if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0 || 
+                    strcasecmp(ext, ".png") == 0 || strcasecmp(ext, ".gif") == 0) {
                     printf("│  %d. %-58s │\n", ++count, entry->d_name);
                 }
             }
         }
+        closedir(dir);
     }
-    closedir(dir);
     
     if (count == 0) {
-        printf("│  No se encontraron imágenes válidas (jpg, jpeg, png, gif)       │\n");
-        printf("│  Asegúrese de que las imágenes estén en: %s            │\n", IMAGES_DIRECTORY);
+        printf("│  No se encontraron imágenes (jpg, jpeg, png, gif)               │\n");
     }
-    printf("└─────────────────────────────────────────────────────────────────┘\n");
-    
-    return count;
+    printf("└───────────────────────────────────────────────────────────────────┘\n");
 }
 
 void mostrar_menu() {
-    printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+    printf("\n┌───────────────────────────────────────────────────────────────────┐\n");
     printf("│                         OPCIONES                                │\n");
-    printf("├─────────────────────────────────────────────────────────────────┤\n");
+    printf("├───────────────────────────────────────────────────────────────────┤\n");
     printf("│  enviar <archivo>  - Enviar imagen RGB REAL (preserva colores)   │\n");
     printf("│  listar           - Mostrar imágenes disponibles                │\n");
     printf("│  estado           - Ver estado de la sesión                     │\n");
-    printf("│  cambiar_dir      - Cambiar directorio de imágenes              │\n");
     printf("│  exit             - Finalizar envío e INICIAR procesamiento     │\n");
     printf("│  help             - Mostrar ayuda                               │\n");
-    printf("└─────────────────────────────────────────────────────────────────┘\n");
+    printf("└───────────────────────────────────────────────────────────────────┘\n");
 }
 
-// FUNCIÓN CORREGIDA: Cargar imagen RGB real con verificación de ruta
+// FUNCIÓN: Cargar imagen RGB real
 unsigned char* cargar_imagen_rgb_real(const char *nombre_imagen, int *ancho, int *alto) {
     int canales_detectados;
-    char ruta_completa[512];
     
-    // Construir ruta completa
-    if (nombre_imagen[0] == '/' || (nombre_imagen[0] == '.' && nombre_imagen[1] == '/')) {
-        // Ruta absoluta o relativa completa
-        strcpy(ruta_completa, nombre_imagen);
-    } else {
-        // Solo nombre de archivo, agregar directorio
-        snprintf(ruta_completa, sizeof(ruta_completa), "%s/%s", IMAGES_DIRECTORY, nombre_imagen);
-    }
-    
-    printf("[CARGA] Intentando cargar imagen desde: %s\n", ruta_completa);
-    
-    // Verificar que el archivo existe
-    if (!verificar_archivo_existe(ruta_completa)) {
-        printf("[ERROR] Archivo no encontrado: %s\n", ruta_completa);
-        
-        // Intentar buscar en el directorio actual
-        if (verificar_archivo_existe(nombre_imagen)) {
-            printf("[INTENTO] Encontrado en directorio actual: %s\n", nombre_imagen);
-            strcpy(ruta_completa, nombre_imagen);
-        } else {
-            printf("[ERROR] Archivo no encontrado en ninguna ubicación\n");
-            printf("[SUGERENCIA] Verifique que:\n");
-            printf("             1. El archivo existe\n");
-            printf("             2. El nombre esté correcto\n");
-            printf("             3. Tenga permisos de lectura\n");
-            printf("             4. Use el comando 'listar' para ver archivos disponibles\n");
-            return NULL;
-        }
-    }
+    printf("[CARGA] Cargando imagen: %s\n", nombre_imagen);
     
     // CRUCIAL: Cargar imagen FORZANDO 3 canales RGB
-    unsigned char *pixel_array = stbi_load(ruta_completa, ancho, alto, &canales_detectados, 3);
+    unsigned char *pixel_array = stbi_load(nombre_imagen, ancho, alto, &canales_detectados, 3);
     
     if (!pixel_array) {
-        printf("[ERROR] stbi_load falló para: %s\n", ruta_completa);
-        printf("[ERROR] Razón posible: %s\n", stbi_failure_reason());
+        printf("[ERROR] No se pudo cargar la imagen: %s\n", nombre_imagen);
         return NULL;
     }
     
     printf("[CARGA] Imagen cargada exitosamente:\n");
-    printf("        • Archivo: %s\n", ruta_completa);
+    printf("        • Archivo: %s\n", nombre_imagen);
     printf("        • Dimensiones: %dx%d\n", *ancho, *alto);
     printf("        • Canales detectados: %d\n", canales_detectados);
     printf("        • Canales forzados: 3 (RGB)\n");
@@ -351,7 +258,6 @@ void mostrar_progreso_recepcion() {
     printf("Estado de la sesión RGB:\n");
     printf("   • Imágenes RGB enviadas: %d\n", total_imagenes_enviadas);
     printf("   • Imágenes procesadas recibidas: %d\n", imagenes_recibidas);
-    printf("   • Directorio actual: %s\n", IMAGES_DIRECTORY);
     
     if (total_imagenes_enviadas > 0) {
         printf("   • Lista de imágenes RGB enviadas:\n");
@@ -455,28 +361,6 @@ void recibir_imagenes_procesadas(int sockfd) {
     exit(0);
 }
 
-void cambiar_directorio() {
-    char nuevo_directorio[256];
-    printf("\nDirectorio actual: %s\n", IMAGES_DIRECTORY);
-    printf("Ingrese nuevo directorio (o presione Enter para mantener actual): ");
-    
-    if (fgets(nuevo_directorio, sizeof(nuevo_directorio), stdin)) {
-        nuevo_directorio[strcspn(nuevo_directorio, "\n")] = '\0';
-        
-        if (strlen(nuevo_directorio) > 0) {
-            if (verificar_archivo_existe(nuevo_directorio)) {
-                // Actualizar la variable global (nota: esto es una simplificación)
-                static char directorio_personalizado[256];
-                strcpy(directorio_personalizado, nuevo_directorio);
-                IMAGES_DIRECTORY = directorio_personalizado;
-                printf("Directorio cambiado a: %s\n", IMAGES_DIRECTORY);
-            } else {
-                printf("El directorio %s no existe o no es accesible\n", nuevo_directorio);
-            }
-        }
-    }
-}
-
 void cliente_interactivo(int sockfd) {
     char comando[256];
     char archivo[200];
@@ -486,19 +370,9 @@ void cliente_interactivo(int sockfd) {
     printf("   1. Las imágenes se cargan preservando información RGB completa\n");
     printf("   2. El servidor recibirá datos RGB reales para clasificación\n");
     printf("   3. Escriba 'exit' para iniciar procesamiento con histograma\n");
-    printf("   4. Las imágenes se guardan ÚNICAMENTE en el servidor\n");
-    printf("   5. Directorio actual: %s\n\n", IMAGES_DIRECTORY);
+    printf("   4. Las imágenes se guardan ÚNICAMENTE en el servidor\n\n");
     
-    crear_directorio_imagenes();
-    int imagenes_disponibles = mostrar_imagenes_disponibles();
-    
-    if (imagenes_disponibles == 0) {
-        printf("\n[CONFIGURACIÓN] Para usar el cliente:\n");
-        printf("   1. Coloque imágenes (.jpg, .jpeg, .png, .gif) en: %s\n", IMAGES_DIRECTORY);
-        printf("   2. O use 'cambiar_dir' para especificar otro directorio\n");
-        printf("   3. Use 'listar' para verificar imágenes disponibles\n\n");
-    }
-    
+    mostrar_imagenes_disponibles();
     mostrar_menu();
     
     printf("\nConectado al servidor de procesamiento RGB\n");
@@ -528,13 +402,10 @@ void cliente_interactivo(int sockfd) {
             printf("\n");
             mostrar_progreso_recepcion();
             
-        } else if (strcmp(comando, "cambiar_dir") == 0) {
-            cambiar_directorio();
-            
         } else if (strcmp(comando, "help") == 0) {
-            printf("\n┌─────────────────────────────────────────────────────────────────┐\n");
+            printf("\n┌───────────────────────────────────────────────────────────────────┐\n");
             printf("│                       AYUDA RGB REAL                            │\n");
-            printf("├─────────────────────────────────────────────────────────────────┤\n");
+            printf("├───────────────────────────────────────────────────────────────────┤\n");
             printf("│  • enviar <archivo> - Envía imagen preservando RGB real         │\n");
             printf("│  • Los colores originales se mantienen para clasificación       │\n");
             printf("│  • El servidor aplicará histograma a la imagen RGB              │\n");
@@ -542,9 +413,7 @@ void cliente_interactivo(int sockfd) {
             printf("│  • Formato: JPG, JPEG, PNG, GIF                                 │\n");
             printf("│  • 'exit' inicia procesamiento por prioridad de tamaño          │\n");
             printf("│  • NO se guardan archivos locales (solo en servidor)            │\n");
-            printf("│  • cambiar_dir - Cambiar directorio de imágenes                 │\n");
-            printf("│  • Directorio actual: %-39s│\n", IMAGES_DIRECTORY);
-            printf("└─────────────────────────────────────────────────────────────────┘\n");
+            printf("└───────────────────────────────────────────────────────────────────┘\n");
             
         } else if (strcmp(comando, "exit") == 0 || strcmp(comando, "EXIT") == 0) {
             if (total_imagenes_enviadas == 0) {
